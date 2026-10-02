@@ -1,0 +1,16 @@
+[Unit]
+Description=Configure Open XDMoD (first boot only)
+After=mariadb.service php-fpm.service
+Requires=mariadb.service
+ConditionPathExists=!/var/lib/xdmod-lab/configured
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/xdmod-firstboot.sh
+TimeoutStartSec=20min
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

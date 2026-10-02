@@ -1,0 +1,21 @@
+---
+# Open OnDemand 4.x portal config (generates /etc/httpd/conf.d/ood-portal.conf)
+servername: null
+port: 443
+listen_addr_port: 443    # conf.d/ssl.conf (which normally adds this) is removed
+# Address users type in the browser (docker publishes 8081 -> 443)
+proxy_server: '192.168.1.248:8081'
+ssl:
+  - 'SSLCertificateFile "/etc/pki/tls/certs/ood.crt"'
+  - 'SSLCertificateKeyFile "/etc/pki/tls/private/ood.key"'
+# No HSTS: the certificate is self-signed
+security_strict_transport: false
+logroot: '/var/log/httpd'
+
+# Lab-only: HTTP basic auth, every user's password is "password"
+auth:
+  - 'AuthType Basic'
+  - 'AuthName "private"'
+  - 'AuthUserFile "/etc/httpd/.htpasswd"'
+  - 'RequestHeader unset Authorization'
+  - 'Require valid-user'

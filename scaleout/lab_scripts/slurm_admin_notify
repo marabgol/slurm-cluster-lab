@@ -1,0 +1,5 @@
+#!/bin/bash
+# Submit trigger for next event
+strigger --set --node --down --program=/etc/slurm/slurm_admin_notify --flags=PERM
+# Notify administrator using by e-mail
+/bin/mail -s "Node $* is Down" root <<< "Node $* is Down, better do something about it"

@@ -1,0 +1,2 @@
+[Service]
+ExecCondition=grep -e 'AuthType=auth/munge' -e 'AuthType=munge' --  /etc/slurm/slurm.conf

@@ -1,0 +1,14 @@
+---
+v2:
+  metadata:
+    title: "scaleout"
+    url: "https://www.schedmd.com/"
+    hidden: false
+  login:
+    host: "login"
+  job:
+    adapter: "slurm"
+    cluster: "cluster"
+    bin: "/usr/local/bin"
+    submit_host: "login"
+    strict_host_checking: false

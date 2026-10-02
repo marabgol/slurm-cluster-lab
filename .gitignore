@@ -1,0 +1,11 @@
+docker-compose.yml
+scaleout/hosts.nodes
+scaleout/nodelist
+patch.d/*.patch
+cloud_socket
+scaleout.tar
+federation
+build*.log
+*.bak
+*.orig
+docker-compose.yml

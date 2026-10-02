@@ -1,0 +1,11 @@
+[Service]
+ExecCondition=bash -c '[[ "$(hostname -s)" =~ mgmtnode[0-9]?$ ]]'
+ExecStartPre=+touch /var/log/slurmctld.log
+ExecStartPre=+chown slurm:slurm /var/log/slurmctld.log
+ExecStartPre=+/usr/local/bin/slurmctld.startup.sh
+ExecStartPost=+/usr/local/bin/slurmctld.startup2.sh
+User=slurm
+Group=slurm
+TimeoutSec=1800
+TimeoutStartSec=1800
+TimeoutStopSec=1800

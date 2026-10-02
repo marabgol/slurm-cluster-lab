@@ -1,0 +1,4 @@
+#!/bin/bash
+
+# Notify administrator using by e-mail that a job only has a minute left
+exec /bin/mail -s "Job:$* only has a minute left" root <<< "Job:$* has only 1 minute left"

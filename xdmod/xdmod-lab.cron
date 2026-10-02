@@ -1,0 +1,2 @@
+# Import Slurm accounting exported by mgmtnode (see /usr/local/sbin/xdmod-ingest.sh)
+*/15 * * * * root /usr/local/sbin/xdmod-ingest.sh >>/var/log/xdmod/lab-ingest.log 2>&1

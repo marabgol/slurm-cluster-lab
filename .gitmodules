@@ -1,0 +1,84 @@
+[submodule "scaleout/src/s2n-tls"]
+	path = scaleout/src/s2n-tls
+	url = https://github.com/aws/s2n-tls.git
+[submodule "scaleout/src/valgrind"]
+	path = scaleout/src/valgrind
+	url = https://sourceware.org/git/valgrind.git
+[submodule "scaleout/src/luarocks"]
+	path = scaleout/src/luarocks
+	url = https://github.com/luarocks/luarocks.git
+[submodule "scaleout/src/libjwt"]
+	path = scaleout/src/libjwt
+	url = https://github.com/benmcollins/libjwt.git
+[submodule "scaleout/src/jq"]
+	path = scaleout/src/jq
+	url = https://github.com/stedolan/jq.git
+[submodule "scaleout/src/munge"]
+	path = scaleout/src/munge
+	url = https://github.com/dun/munge.git
+[submodule "scaleout/src/gdb"]
+	path = scaleout/src/gdb
+	url = https://sourceware.org/git/binutils-gdb.git
+[submodule "scaleout/src/hdf"]
+	path = scaleout/src/hdf
+	url = https://github.com/HDFGroup/hdf5.git
+[submodule "scaleout/src/libevent"]
+	path = scaleout/src/libevent
+	url = https://github.com/libevent/libevent.git
+[submodule "scaleout/src/hwloc"]
+	path = scaleout/src/hwloc
+	url = https://github.com/open-mpi/hwloc.git
+[submodule "scaleout/src/pmix"]
+	path = scaleout/src/pmix
+	url = https://github.com/pmix/pmix.git
+[submodule "scaleout/src/slurm"]
+	path = scaleout/src/slurm
+	url = https://github.com/SchedMD/slurm.git
+[submodule "scaleout/src/pdsh"]
+	path = scaleout/src/pdsh
+	url = https://github.com/chaos/pdsh.git
+[submodule "scaleout/src/msmtp"]
+	path = scaleout/src/msmtp
+	url = https://github.com/marlam/msmtp-mirror.git
+[submodule "scaleout/src/squashfuse"]
+	path = scaleout/src/squashfuse
+	url = https://github.com/vasi/squashfuse.git
+[submodule "scaleout/src/pyxis"]
+	path = scaleout/src/pyxis
+	url = https://github.com/NVIDIA/pyxis.git
+[submodule "scaleout/src/enroot"]
+	path = scaleout/src/enroot
+	url = https://github.com/NVIDIA/enroot.git
+[submodule "scaleout/src/stressng"]
+	path = scaleout/src/stressng
+	url = https://github.com/ColinIanKing/stress-ng.git
+[submodule "scaleout/src/clush"]
+	path = scaleout/src/clush
+	url = https://github.com/cea-hpc/clustershell.git
+[submodule "scaleout/src/urllib3"]
+	path = scaleout/src/urllib3
+	url = https://github.com/urllib3/urllib3.git
+[submodule "scaleout/src/conmon"]
+	path = scaleout/src/conmon
+	url = https://github.com/containers/conmon.git
+[submodule "scaleout/src/podman"]
+	path = scaleout/src/podman
+	url = https://github.com/containers/podman.git
+[submodule "scaleout/src/charliecloud"]
+	path = scaleout/src/charliecloud
+	url = https://gitlab.com/charliecloud/charliecloud.git
+[submodule "scaleout/src/slurmcommander"]
+	path = scaleout/src/slurmcommander
+	url = https://github.com/CLIP-HPC/SlurmCommander.git
+[submodule "scaleout/src/parallel"]
+	path = scaleout/src/parallel
+	url = https://github.com/mikelolasagasti/parallel.git
+[submodule "scaleout/src/openapi-generator"]
+	path = scaleout/src/openapi-generator
+	url = https://github.com/OpenAPITools/openapi-generator.git
+[submodule "scaleout/src/openmpi/v4.1.4"]
+	path = scaleout/src/openmpi/v4.1.4
+	url = https://github.com/open-mpi/ompi.git
+[submodule "scaleout/src/openmpi/v5.0.0rc9"]
+	path = scaleout/src/openmpi/v5.0.0rc9
+	url = https://github.com/open-mpi/ompi.git

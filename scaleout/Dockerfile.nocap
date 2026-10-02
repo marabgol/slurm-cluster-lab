@@ -1,0 +1,482 @@
+ARG DOCKER_FROM
+FROM ${DOCKER_FROM} AS base
+ARG SLURM_RELEASE
+COPY profile.sh /etc/profile.d/container.sh
+# ood (open-ondemand user) is hardcoded to user 1000. must ensure uid is not different
+RUN groupadd -g 1000 ood && \
+	useradd --no-create-home --gid ood -u 1000 ood
+RUN dnf -y install 'dnf-command(config-manager)'
+RUN dnf -y install dnf-plugins-core
+RUN dnf config-manager --set-enabled powertools
+RUN dnf -y install --allowerasing --exclude google-chrome-* \
+	rpm gcc automake make perl-macros rpm-build passwd \
+	readline-devel openssl-devel openssl pam-devel \
+	perl-ExtUtils-MakeMaker.noarch mariadb-devel mariadb \
+	glib2-devel gtk2-devel libtool git vim hostname \
+	perl-Switch expect lua-devel rrdtool-devel lz4-devel json-c-devel \
+	libcurl-devel freeipmi-devel numactl-devel lynx numactl \
+	rdma-core-devel gcc-c++ flex libgcrypt-devel gcc-gfortran \
+	strace ltrace wget cmake sudo jansson-devel xz-devel \
+	openssh-server pam-devel xterm oniguruma-devel xmvn \
+	lua-devel xauth man mailx postfix http-parser-devel \
+	libyaml-devel mlocate gettext-devel texinfo java-21-openjdk-devel \
+	systemd net-tools socat jq squashfs-tools fuse-overlayfs pigz \
+	fuse-devel rpcgen cronie iproute procps-ng \
+	lua-json.noarch rsync crun go gpgme-devel libseccomp-devel \
+	libassuan-devel dbus-devel bash-completion tzdata-java \
+	python3-setuptools-wheel python3-virtualenv python3-urllib3 \
+	python3-six python3-requests python3-pexpect \
+	python3.11 python3.11-pip python3.11-pytest python3.11-requests \
+	bc emacs nano gmp-devel mpfr-devel bison elfutils-debuginfod \
+	>/dev/null
+RUN update-alternatives --set 'java' java-21-openjdk.x86_64 && \
+	alternatives --set python3 /usr/bin/python3.11 && \
+	ln -s $(which pytest-3.11) /usr/bin/pytest-3 && \
+	ln -s $(which pytest-3.11) /usr/bin/pytest && \
+	ln -s /usr/lib/python3.6/site-packages/pexpect/ /usr/lib/python3.11/site-packages/pexpect && \
+	ln -s /usr/lib/python3.6/site-packages/ptyprocess/ /usr/lib/python3.11/site-packages/ptyprocess
+ARG CMAKE_BUILD_TYPE
+ENV CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+#Turn off warnings about detached head
+RUN git config --global advice.detachedHead false && \
+	git config --global user.email "you@example.com" && \
+	git config --global user.name "scale out"
+COPY src/s2n-tls/ /usr/local/src/s2n-tls/
+WORKDIR /usr/local/src/s2n-tls/
+RUN cmake . -Bbuild \
+		-DCMAKE_INSTALL_PREFIX=/usr/local/ \
+		-DBUILD_SHARED_LIBS=ON \
+		-DS2N_INSTALL_S2NC_S2ND=1 >/dev/null && \
+	cmake --build build -j $(nproc) >/dev/null && \
+	cmake --install build >/dev/null
+COPY src/valgrind/ /usr/local/src/valgrind/
+COPY valgrind.patch /usr/local/src/valgrind.patch
+ARG DISABLE_DEVELOPER
+RUN [ ${DISABLE_DEVELOPER} ] || ( \
+	cd /usr/local/src/valgrind/ && \
+	patch -p1 < /usr/local/src/valgrind.patch && \
+	./autogen.sh >/dev/null && \
+	./configure --prefix=/usr/local/ >/dev/null && \
+        make -j6 >/dev/null && \
+	make install >/dev/null )
+COPY src/luarocks/ /usr/local/src/luarocks/
+WORKDIR /usr/local/src/luarocks/
+RUN ./configure --prefix=/usr/local --sysconfdir=/etc/ >/dev/null && \
+	make -j6 >/dev/null && \
+	make install >/dev/null && \
+	luarocks install lunajson >/dev/null
+RUN pip3 install certifi pip wheel setuptools markdown pydantic dateutils
+COPY src/libjwt/ /usr/local/src/libjwt/
+WORKDIR /usr/local/src/libjwt
+RUN autoreconf --force --install &>/dev/null && \
+	./configure --prefix=/usr/local --sysconfdir=/etc/ &>/dev/null && \
+	make -j6 &>/dev/null && \
+	make install &>/dev/null
+COPY src/jq/ /usr/local/src/jq/
+WORKDIR /usr/local/src/jq
+RUN autoreconf --force --install &>/dev/null && \
+	./configure --prefix=/usr/local --sysconfdir=/etc/ --disable-valgrind --disable-maintainer-mode &>/dev/null && \
+	make -j6 &>/dev/null && \
+	make install &>/dev/null
+COPY src/munge/ /usr/local/src/munge/
+WORKDIR /usr/local/src/munge/
+RUN [ ${DISABLE_DEVELOPER} ] && ARGS="--disable-debug --disable-maintainer-mode" || ARGS="--enable-debug --enable-maintainer-mode"; \
+	autoreconf -i &>/dev/null && \
+	./configure $ARGS --localstatedir=/var --prefix=/usr/local --sysconfdir=/etc/ &>/dev/null && \
+	make -j6 &>/dev/null && \
+	make install &>/dev/null
+COPY src/gdb/ /usr/local/src/gdb/
+RUN test ${DISABLE_DEVELOPER} || ( \
+	cd /usr/local/src/gdb/ && \
+	autoreconf -i >/dev/null && \
+	./configure --localstatedir=/var --prefix=/usr/local/ --sysconfdir=/etc/ --with-lzma &>/dev/null && \
+	make -j6 &>/dev/null && make install &>/dev/null )
+# Link already installed gdb if gdb not built
+RUN test -e /usr/local/bin/gdb || ln -nfs /usr/libexec/gdb /usr/local/bin/gdb
+RUN mkdir -p /etc/slurm/plugstack.conf.d/ /etc/pmix
+COPY src/hdf/ /usr/local/src/hdf/
+WORKDIR /usr/local/src/hdf
+RUN [ ${DISABLE_DEVELOPER} ] && ARGS="--enable-build-mode=production --disable-dependency-tracking --enable-profiling=no" || ARGS="--enable-build-mode=debug"; \
+	./configure --prefix=/usr/local/ $ARGS &>/dev/null && \
+	make -j6 &>/dev/null && \
+	make -j6 install &>/dev/null
+COPY src/libevent/ /usr/local/src/libevent/
+WORKDIR /usr/local/src/libevent
+RUN ./autogen.sh && ./configure --prefix=/usr/local >/dev/null && make -j6 >/dev/null && make install >/dev/null
+COPY src/hwloc/ /usr/local/src/hwloc/
+WORKDIR /usr/local/src/hwloc
+RUN [ ${DISABLE_DEVELOPER} ] && ARGS="--disable-debug" || ARGS="--enable-debug --disable-picky"; \
+	./autogen.sh >/dev/null && \
+	./configure --prefix=/usr/local --sysconfdir=/etc/hwloc/ $ARGS >/dev/null && \
+	make -j6 >/dev/null && \
+	make install >/dev/null
+COPY src/pmix/ /usr/local/src/pmix/
+WORKDIR /usr/local/src/pmix
+RUN [ ${DISABLE_DEVELOPER} ] && ARGS="--disable-debug --disable-pmix-timing" || ARGS="--enable-debug"; \
+	unlink .git && \
+	./autogen.pl >/dev/null && \
+	./configure --prefix=/usr/local --sysconfdir=/etc/pmix/ --with-tests-examples $ARGS --with-libevent=/usr/local/ --enable-ipv6 >/dev/null && \
+	make -j6 >/dev/null && \
+	make install >/dev/null
+COPY src/slurm/ /usr/local/src/slurm/
+WORKDIR /usr/local/src/slurm
+RUN if [ ! -z "${DISABLE_DEVELOPER}" ]; then \
+		CONF_ARGS=""; \
+	else \
+		CONF_ARGS="--enable-memory-leak-debug --enable-developer --disable-optimizations"; \
+	fi; \
+	unlink .git; \
+	./configure --enable-slurmrestd --enable-multiple-slurmd $CONF_ARGS --with-munge=/usr/local/ --prefix=/usr/local \
+		--sharedstatedir=/run/slurm/ --with-pmix=/usr/local --with-hdf5=/usr/local/bin/h5cc \
+		--enable-pam --with-s2n=/usr/local --sysconfdir=/etc/slurm >/dev/null && \
+	make -j6 >/dev/null && make install >/dev/null && make -j6 install-contrib >/dev/null && \
+	cd contribs && make install >/dev/null && \
+	ln -nfs /usr/local/src/slurm/contribs/slurm_completion_help/slurm_completion.sh /etc/bash_completion.d/slurm_completion.sh
+COPY slurm.bash_profile /tmp/slurm.bash_profile
+RUN /usr/sbin/groupadd -r slurm -g 1001 && \
+	/usr/sbin/useradd -c "scheduler daemon" -d "/home/slurm/" -g slurm -s /bin/bash -u 1001 -r slurm && \
+	/usr/sbin/groupadd -r slurmrestd -g 1002 && \
+	/usr/sbin/useradd -c "REST daemon" -d "/etc/slurm" -g slurmrestd -s /bin/bash -u 1002 -r slurmrestd && \
+	echo 'slurm        ALL=(ALL)       NOPASSWD: ALL' >> /etc/sudoers && \
+	mkdir -m 0770 -p /home/slurm && chown slurm:slurm /home/slurm && \
+	mv /tmp/slurm.bash_profile /home/slurm/.bash_profile && \
+	chown slurm:slurm /home/slurm/.bash_profile && \
+	chmod 0700 /home/slurm/.bash_profile && \
+	chmod 0400 /etc/shadow && \
+	chmod 4755 /bin/ping
+
+RUN /usr/sbin/groupadd -r munge && \
+	/usr/sbin/useradd -c "MUNGE authentication service" -d "/usr/local/etc/munge" -g munge -s /bin/false -r munge && \
+	mkdir -m 0700 -p /etc/munge/ && \
+	mkdir -p -m 0700 /var/log/munge && \
+	chown munge:munge -R /var/log/munge /var/run/munge/ && \
+	dd if=/dev/urandom bs=1 count=1024 >/etc/munge/munge.key && \
+	touch /etc/munge/munge.seed && \
+	chown munge:munge -R /etc/munge && \
+	chmod 0400 /etc/munge/munge.key /etc/munge/munge.seed && \
+	chown root:root /etc/munge/ -R && \
+	chown -R munge:munge /etc/munge
+COPY src/pdsh/ /usr/local/src/pdsh/
+WORKDIR /usr/local/src/pdsh
+RUN [ ${DISABLE_DEVELOPER} ] && ARGS="--disable-debug" || ARGS="--enable-debug"; \
+	sed -e 's#git describe --always#echo scaleout#' -i configure.ac && \
+	autoreconf -i >/dev/null && \
+	./configure $ARGS --disable-dependency-tracking --disable-code-coverage \
+		--without-rsh --without-mrsh --without-torque --without-dmalloc \
+		--with-ssh --prefix=/usr/local --sysconfdir=/etc/ --with-readline \
+		--with-slurm >/dev/null && \
+	make -j6 >/dev/null && \
+	make install >/dev/null
+COPY src/openmpi/v4.1.4/ /usr/local/src/openmpi/v4.1.4/
+WORKDIR /usr/local/src/openmpi/v4.1.4/
+RUN [ ${DISABLE_DEVELOPER} ] && ARGS="--without-devel-headers --disable-debug" || ARGS="--with-devel-headers --enable-debug"; \
+	unlink .git && \
+	./autogen.pl && \
+	./configure --prefix=/usr/local/openmpi/4.1.4 --with-pmix=/usr/local \
+	--with-pmix-libdir=/usr/local/lib --with-pmi=/usr/local --with-slurm \
+	$ARGS --without-cma --with-libevent=/usr/local \
+	--with-hwloc=/usr/local/ --enable-mca-no-build=btl-uct >/dev/null && \
+	make -j6 &>/dev/null && \
+	make install >/dev/null
+COPY src/openmpi/v5.0.0rc9/ /usr/local/src/openmpi/v5.0.0rc9/
+WORKDIR /usr/local/src/openmpi/v5.0.0rc9/
+RUN [ ${DISABLE_DEVELOPER} ] && ARGS="--without-devel-headers --disable-debug" || ARGS="--with-devel-headers --enable-debug"; \
+	unlink .git && \
+	./autogen.pl && \
+	./configure --prefix=/usr/local/openmpi/5.0.0rc9 \
+	--with-pmix=/usr/local \
+	--with-slurm \
+	$ARGS \
+	--without-cma --with-libevent=/usr/local \
+	--with-libevent-header=/usr/local/include \
+	--with-libevent-libs=/usr/local/lib --with-hwloc=/usr/local/ \
+	--enable-mca-no-build=btl-uct >/dev/null \
+	&& make -j6 &>/dev/null && \
+	make install >/dev/null
+COPY src/msmtp/ /usr/local/src/msmtp/
+WORKDIR /usr/local/src/msmtp
+RUN autoreconf -i && ./configure >/dev/null && \
+	make -j6 >/dev/null && \
+	make install >/dev/null && \
+	ln -nfs /usr/local/bin/msmtp /usr/sbin/sendmail && \
+	ln -nfs /usr/local/bin/msmtp /usr/lib/sendmail
+COPY msmtprc /usr/local/etc/msmtprc
+ARG SUBNET
+ARG SUBNET6
+ENV SUBNET=${SUBNET}
+ENV SUBNET6=${SUBNET6}
+RUN postconf -e "mydestination = cluster scaleout localhost.localdomain localhost" && \
+	postconf -e "mynetworks = 127.0.0.0/8, ${SUBNET}.0.0/16" && \
+	postconf -e "inet_interfaces = all" && \
+	postconf -e "recipient_delimiter = +"
+RUN newaliases && \
+	postconf -e "mydestination = login login.localdomain cluster scaleout localhost.localdomain, localhost"
+
+#Install OpenAPI generator wrapper script and force local cache of 7.3.0 by default
+COPY src/openapi-generator/bin/utils/openapi-generator-cli.sh /usr/local/bin/openapi-generator-cli
+RUN chmod +x /usr/local/bin/openapi-generator-cli && \
+	env OPENAPI_GENERATOR_VERSION=7.3.0 /usr/local/bin/openapi-generator-cli version
+COPY src/parallel/ /usr/local/src/parallel/
+WORKDIR /usr/local/src/parallel
+ARG DISABLE_GNU_PARALLEL
+RUN test $DISABLE_GNU_PARALLEL || ( \
+	autoreconf -i >/dev/null && \
+	./configure --disable-documentation >/dev/null && \
+	make -j6 >/dev/null && \
+	make install >/dev/null)
+
+COPY enroot.conf /tmp/enroot.conf
+COPY src/squashfuse/ /usr/local/src/squashfuse/
+COPY src/pyxis/ /usr/local/src/pyxis/
+COPY src/enroot/ /usr/local/src/enroot/
+ARG DISABLE_PYXIS
+# squashfuse is only used by enroot
+RUN [ ${DISABLE_PYXIS} ] || ( \
+	cd /usr/local/src/squashfuse && \
+	autoreconf -i >/dev/null && \
+	./configure --disable-demo >/dev/null && \
+	make -j6 >/dev/null && \
+	make install >/dev/null )
+RUN [ ${DISABLE_DEVELOPER} ] && ARGS= || ARGS=DEBUG=1; \
+	[ ${DISABLE_PYXIS} ] || ( \
+	cd /usr/local/src/pyxis && \
+	make install >/dev/null && \
+	cd /usr/local/src/enroot && \
+	make $DEBUG sysconfdir=/etc/ -j >/dev/null && \
+	make install >/dev/null && \
+	make setcap && \
+	ln -nfs /usr/local/share/pyxis/pyxis.conf /etc/slurm/plugstack.conf.d/pyxis.conf && \
+	mkdir -m 0755 -p /etc/enroot/ && \
+	mv /tmp/enroot.conf /etc/enroot/enroot.conf )
+COPY src/stressng/ /usr/local/src/stressng/
+WORKDIR /usr/local/src/stressng
+RUN make -j6 >/dev/null && \
+	make install >/dev/null
+COPY src/clush/ /usr/local/src/clush/
+WORKDIR /usr/local/src/clush
+RUN python3 ./setup.py install >/dev/null
+COPY src/urllib3/ /usr/local/src/urllib3/
+WORKDIR /usr/local/src/urllib3
+RUN python3 setup.py install >/dev/null
+COPY src/conmon/ /usr/local/src/conmon/
+WORKDIR /usr/local/src/conmon
+RUN export GOCACHE="$(mktemp -d)" && \
+	unlink .git && \
+	make -j6 && make podman && make install
+COPY src/podman/ /usr/local/src/podman/
+WORKDIR /usr/local/src/podman
+RUN export GOCACHE="$(mktemp -d)" && \
+	unlink .git && \
+	make -j6 >/dev/null && \
+	make podman >/dev/null && \
+	make install >/dev/null
+COPY src/charliecloud/ /usr/local/src/charliecloud/
+WORKDIR /usr/local/src/charliecloud
+RUN [ ${DISABLE_DEVELOPER} ] && ARGS="--disable-maintainer-mode" || ARGS="--enable-maintainer-mode"; \
+	./autogen.sh >/dev/null && \
+	./configure $ARGS --disable-dependency-tracking --enable-buggy-build --disable-test --disable-html >/dev/null && \
+	make -j6 >/dev/null && \
+	make install >/dev/null
+
+#make ssh host keys
+RUN ssh-keygen -f /etc/ssh/ssh_host_rsa_key -N '' -t rsa && \
+	ssh-keygen -f /etc/ssh/ssh_host_ecdsa_key -N '' -t ecdsa && \
+	ssh-keygen -f /etc/ssh/ssh_host_ed25519_key -N '' -t ed25519 && \
+	echo 'password' | passwd root --stdin && \
+	mkdir -p /root/.ssh && \
+	ssh-keygen -f /root/.ssh/id_ecdsa -N '' -t ecdsa && \
+	ssh-keygen -y -f /root/.ssh/id_ecdsa > /root/.ssh/id_ecdsa.pub && \
+	cat /root/.ssh/id_ecdsa.pub >> /root/.ssh/authorized_keys && \
+	chmod -R 0700 /root/.ssh && \
+	echo -n "ood" | passwd --stdin ood && \
+	mkdir -p /home/ood/.ssh && \
+	ssh-keygen -f /home/ood/.ssh/id_ecdsa -N '' -t ecdsa && \
+	ssh-keygen -y -f /home/ood/.ssh/id_ecdsa > /home/ood/.ssh/id_ecdsa.pub && \
+	cat /home/ood/.ssh/id_ecdsa.pub >> /home/ood/.ssh/authorized_keys && \
+	chown -R ood:ood /home/ood/.ssh && chmod -R 0700 /home/ood/.ssh
+
+RUN groupadd -g 1005 bedrock && \
+	groupadd -g 1006 managers
+RUN for i in arnold bambam barney betty chip dino edna fred gazoo pebbles wilma; do \
+	/usr/sbin/useradd -c $i -m -g users -G bedrock $i && \
+	echo 'password' | passwd $i --stdin && \
+	mkdir -p /home/$i/.ssh && \
+	mkdir -p /srv/containers/$i/ && \
+	chown $i:bedrock /srv/containers/$i/ && \
+	chmod 0700 /srv/containers/$i/ && \
+	ssh-keygen -f /home/$i/.ssh/id_ecdsa -N '' -t ecdsa && \
+	ssh-keygen -y -f /home/$i/.ssh/id_ecdsa > /home/$i/.ssh/id_ecdsa.pub && \
+	cat /home/$i/.ssh/id_ecdsa.pub >> /home/$i/.ssh/authorized_keys && \
+	chown -R $i:users /home/$i/.ssh && chmod -R 0700 /home/$i/.ssh; \
+	mkdir -p /home/$i/.enroot/{data,cache}; \
+	done
+RUN usermod -G managers fred && \
+	usermod -G managers barney
+
+#disable ssh host auth checks
+RUN echo -e '\nNoHostAuthenticationForLocalhost=yes\nStrictHostKeyChecking=no' >> /etc/ssh/ssh_config && \
+	echo -e '\nAddressFamily any\nUseDNS no' >> /etc/ssh/sshd_config
+
+#override the ssh host keys to be known
+RUN awk '{print "*", $1, $2}' </etc/ssh/ssh_host_ecdsa_key.pub >> /etc/ssh/ssh_known_hosts
+
+#add pam module as first module
+RUN echo -e '+:root:ALL\n+:wheel:ALL\n+:slurm:ALL\n-:ALL:ALL' > /etc/security/access.conf && \
+	chmod 0700 /etc/security/access.conf && \
+	echo -e '#%PAM-1.0\naccount    sufficient      pam_access.so\naccount    required     pam_slurm_adopt.so\n' | \
+	cat - /etc/pam.d/sshd > /etc/pam.d/sshd2 && \
+	mv /etc/pam.d/sshd2 /etc/pam.d/sshd && \
+	mkdir -m 0755 -p /var/spool/slurm/statesave /var/spool/slurm/spool && \
+	chown slurm:slurm -R /var/spool/slurm/ && \
+	echo -e 'SlurmdSpoolDir=/var/spool/slurm/spool' > /etc/nss_slurm.conf
+
+#active slurm nss
+COPY bashrc /tmp/bashrc
+RUN awk '{if (match($1, /^(passwd|group)/)) {print $1, "slurm", $2, $3} else {print $0}}' > /etc/nsswitch2.conf </etc/nsswitch.conf && \
+	mv /etc/nsswitch2.conf /etc/nsswitch.conf && \
+	mkdir -p /etc/PDSH && \
+	echo -e "node00\nnode01\nnode02\nnode03\nnode04\nnode05\nnode06\nnode07\nnode08\nnode09" > /etc/PDSH/hosts && \
+	cat /tmp/bashrc >> /etc/bashrc && unlink /tmp/bashrc && \
+	mandb
+COPY src/slurmcommander/ /usr/local/src/slurmcommander/
+WORKDIR /usr/local/src/slurmcommander/
+RUN make build >/dev/null && \
+	make install >/dev/null && \
+	mkdir -p /etc/scom && \
+	echo 'prefix="/usr/local/bin"' > /etc/scom/scom.conf && \
+	cp scom /usr/local/bin/scom
+
+COPY my.cnf /etc/
+RUN sed -e "s#{SUBNET}#${SUBNET}#g" -i /etc/my.cnf && \
+	ln -s /etc/my.cnf /usr/local/etc/my.cnf
+COPY mysql /usr/local/bin/mysql
+ARG DISABLE_KEYCLOAK
+COPY slurmctld.startup.sh /usr/local/bin/slurmctld.startup.sh
+RUN sed -e "s#{SUBNET}#${SUBNET}#g" -e "s#{DISABLE_KEYCLOAK}#${DISABLE_KEYCLOAK}#g" -i /usr/local/bin/slurmctld.startup.sh
+COPY slurmctld.startup2.sh /usr/local/bin/slurmctld.startup2.sh
+COPY slurmdbd.startup.sh /usr/local/bin/slurmdbd.startup.sh
+COPY slurmd.startup.sh /usr/local/bin/slurmd.startup.sh
+COPY slurmd.check.sh /usr/local/bin/slurmd.check.sh
+COPY sackd.check.sh /usr/local/bin/sackd.check.sh
+COPY login.startup.sh /usr/local/bin/login.startup.sh
+COPY slurmrestd.startup.sh /usr/local/bin/slurmrestd.startup.sh
+COPY slurmrestd.env /etc/sysconfig/slurmrestd
+COPY test-build.sh /usr/local/bin/test-build.sh
+RUN sed -e "s/{SUBNET6}/${SUBNET6}/" -e "s/{SUBNET}/${SUBNET}/" \
+	-i /etc/sysconfig/slurmrestd && \
+	chmod 0755 /usr/local/bin/*.sh
+
+ARG DOCKER_FROM
+FROM ${DOCKER_FROM} AS scaleout
+COPY --from=base / /
+
+RUN dd if=/dev/random of=/etc/slurm/slurm.key bs=1024 count=1 && \
+	chown slurm:slurm /etc/slurm/slurm.key && \
+	chmod 600 /etc/slurm/slurm.key
+RUN cp /usr/local/src/slurm/etc/{slurmctld.service,slurmd.service,slurmdbd.service,slurmrestd.service,sackd.service}  /usr/lib/systemd/system && \
+	echo -e '#!/bin/bash\nset -o vi' > /etc/profile.d/mode.sh && \
+	chmod 0755 /usr/local/bin/mysql && \
+	chmod 0755 /usr/local/bin/slurmctld.startup.sh && \
+	chmod 0755 /usr/local/bin/slurmd.startup.sh && \
+	chmod 0755 /usr/local/bin/login.startup.sh && \
+	chmod 0755 /usr/local/bin/slurmrestd.startup.sh && \
+	mkdir -m 0770 -p /auth && chown -R slurm:slurm /auth
+
+COPY globals.local /usr/local/src/slurm/testsuite/expect/globals.local
+COPY testsuite.conf /usr/local/src/slurm/testsuite/testsuite.conf
+
+#RUN echo "define(`SMART_HOST', `login')dnl" >> /etc/mail/sendmail.mc
+RUN echo -e "/usr/local/lib\n/usr/local/lib64" >> /etc/ld.so.conf.d/usr_local_lib.conf && \
+	ldconfig && updatedb && \
+	rm -f /run/nologin
+WORKDIR /root/
+
+COPY dump_xdmod.sh /etc/cron.hourly/dump_xdmod.sh
+COPY resume.node.sh /usr/local/sbin/
+COPY suspend.node.sh /usr/local/sbin/
+RUN chmod 0755 /usr/local/sbin/{resume.node.sh,suspend.node.sh} && \
+	mkdir -p /etc/systemd/system/{postfix,slurmctld,slurmdbd,slurmd,slurmrestd,sackd,munge}.service.d
+COPY slurmd.slice /etc/systemd/system/slurmd.slice
+COPY munge.service /etc/systemd/system/munge.service.d/local.conf
+COPY sackd.service /etc/systemd/system/sackd.service.d/local.conf
+COPY slurmdbd.service /etc/systemd/system/slurmdbd.service.d/local.conf
+COPY slurmctld.service /etc/systemd/system/slurmctld.service.d/local.conf
+COPY slurmd.service /etc/systemd/system/slurmd.service.d/local.conf
+COPY slurmrestd.service /etc/systemd/system/slurmrestd.service.d/local.conf
+COPY postfix.service /etc/systemd/system/postfix.service.d/local.conf
+COPY podman-containers /etc/containers/
+RUN systemctl enable slurmdbd slurmctld sackd slurmd slurmrestd postfix slurmd.slice munge && \
+	systemctl disable dnf-makecache.timer && \
+	systemctl mask systemd-udevd.service kdump.service systemd-tmpfiles-clean.timer  nis-domainname.service systemd-hwdb-update.service systemd-udev-trigger.service
+ARG SLURM_BENCHMARK
+COPY benchmark /root/benchmark
+RUN if [ ! -z "${SLURM_BENCHMARK}" ]; then \
+	find /root/benchmark/run.d/ -type f -name '${SLURM_BENCHMARK}\*.sh' -print0 | \
+	xargs -0 -i bash {}; \
+	fi
+COPY get_keycloak_jwt.sh /usr/bin/get_keycloak_jwt.sh
+ARG SUBNET
+RUN sed -e "s#{SUBNET}#${SUBNET}#g" -i /usr/bin/get_keycloak_jwt.sh
+
+COPY nodelist /etc/nodelist
+
+RUN mkdir -p -m 0777 /lab_scripts
+COPY lab_scripts/* /lab_scripts/
+
+RUN mkdir -m 0755 -p /etc/slurm/
+COPY slurm/ /etc/slurm/
+
+RUN test -s /etc/slurm/jwt.key || dd if=/dev/urandom bs=32 count=1 >/etc/slurm/jwt.key; \
+	chown slurm:slurm -R /etc/slurm/ &&\
+	chmod 0600 /etc/slurm/{jwks.json,jwt.key,slurmdbd.conf}
+
+RUN openssl ecparam -out /etc/slurm/ca_cert_key.pem -name prime256v1 -genkey && \
+	openssl req -x509 -key /etc/slurm/ca_cert_key.pem \
+		-out /etc/slurm/ca_cert.pem \
+		-subj "/C=XX/ST=StateName/L=CityName/O=CompanyName/OU=CompanySectionName/CN=scaleout" && \
+	for CN in ctld dbd restd slurmd sackd login; do \
+		if [ ! -f /etc/slurm/ca_cert.srl ]; then \
+			SERIAL="-CAcreateserial"; \
+		else \
+			SERIAL="-CAserial /etc/slurm/ca_cert.srl"; \
+		fi && \
+		openssl ecparam -out /etc/slurm/${CN}_cert_key.pem -name prime256v1 -genkey && \
+		openssl req -new -key /etc/slurm/${CN}_cert_key.pem -out /etc/slurm/${CN}_cert.csr \
+			-subj "/C=XX/ST=StateName/L=CityName/O=CompanyName/OU=CompanySectionName/CN=${CN}" && \
+		openssl x509 -req -in /etc/slurm/${CN}_cert.csr \
+			-CA /etc/slurm/ca_cert.pem \
+			-CAkey /etc/slurm/ca_cert_key.pem \
+			${SERIAL} \
+			-out /etc/slurm/${CN}_cert.pem -sha384; \
+	done && \
+	for NODE in $(cut -f1 -d " " /etc/nodelist); do \
+		openssl ecparam -out /etc/slurm/${NODE}_slurmd_cert_key.pem -name prime256v1 -genkey && \
+		openssl req -new -key /etc/slurm/${NODE}_slurmd_cert_key.pem -out /etc/slurm/${NODE}_slurmd_cert.csr \
+			-subj "/C=XX/ST=StateName/L=CityName/O=CompanyName/OU=CompanySectionName/CN=${NODE}" && \
+		openssl x509 -req -in /etc/slurm/${NODE}_slurmd_cert.csr \
+			-CA /etc/slurm/ca_cert.pem \
+			-CAkey /etc/slurm/ca_cert_key.pem \
+			-CAserial /etc/slurm/ca_cert.srl \
+			-out /etc/slurm/${NODE}_slurmd_cert.pem -sha384 && \
+		base64 /dev/urandom | head -c 32 > /etc/slurm/${NODE}_token.txt && \
+		chown slurm:slurm /etc/slurm/${NODE}_token.txt && \
+		chmod 0600 /etc/slurm/${NODE}_token.txt && \
+		printf "${NODE}: $(cat /etc/slurm/${NODE}_token.txt)\n" >> /etc/slurm/node_token_list.txt; \
+	done && \
+	chown slurm:slurm /etc/slurm/*{.pem,.csr} /etc/slurm/node_token_list.txt && \
+	chown slurmrestd:slurmrestd /etc/slurm/restd_cert{.csr,.pem,_key.pem} && \
+	chmod 0600 /etc/slurm/*_cert_key.pem /etc/slurm/*.csr /etc/slurm/node_token_list.txt && \
+	chmod 0644 /etc/slurm/*_cert.pem
+
+COPY tls_get_node_token.sh /usr/local/sbin/tls_get_node_token.sh
+COPY tls_gen_csr.sh /usr/local/sbin/tls_gen_csr.sh
+COPY tls_validate_node.sh /usr/local/sbin/tls_validate_node.sh
+COPY tls_sign_csr.sh /usr/local/sbin/tls_sign_csr.sh
+COPY tls_get_node_cert_key.sh /usr/local/sbin/tls_get_node_cert_key.sh
+RUN chmod 0700 /usr/local/sbin/{tls_get_node_token.sh,tls_gen_csr.sh,tls_validate_node.sh,tls_sign_csr.sh,tls_get_node_cert_key.sh}
+
+STOPSIGNAL SIGRTMIN+3
+VOLUME ["/tmp", "/run", "/run/lock", "/run/slurm", "/run/slurmctld", "/run/slurmdbd", "/var/run/slurm/" ]
+COPY hosts.nodes /etc/
+COPY startup.sh /sbin/
+CMD [ "/sbin/startup.sh" ]

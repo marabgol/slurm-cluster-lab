@@ -1,0 +1,11 @@
+{
+  "associations": [
+    {
+      "parent_account": "root",
+      "account": "testaccount",
+      "user": "testuser",
+      "cluster": "cluster",
+      "partition": ""
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "accounts": [
+    {
+      "organization": "test org",
+      "description": "test description",
+      "name": "testaccount"
+    }
+  ]
+}

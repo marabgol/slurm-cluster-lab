@@ -1,0 +1,8 @@
+#
+# Appended to /etc/bashrc
+#
+export WCOLL=/etc/PDSH/hosts
+alias cls='clear'
+alias ..='cd ..'
+alias l='ls -alF'
+alias w='watch "sinfo -pdebug -O nodehost:10,Features:15,partition:10,statelong:8,cpus:5,cpusstate:14,memory:8,allocmem:9,freemem:9,cpusload:9,gres:10,gresused:20,prioritytier:10,weight:7,reason:10 ; squeue -a -o '\''%.18i %.9P %.8j %.8u %.8T %.10M %.9l %.6D %R %Q'\'' | column -t"'

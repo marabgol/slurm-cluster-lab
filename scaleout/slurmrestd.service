@@ -1,0 +1,5 @@
+[Service]
+Environment="SLURM_JWT="
+Environment="SLURMRESTD_LISTEN="
+ExecCondition=bash -c 'test $(hostname -s) = "rest"'
+ExecStartPre=+/usr/local/bin/slurmrestd.startup.sh
