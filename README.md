@@ -98,7 +98,7 @@ source-built components compile cleanly on aarch64.
 ## Quick start
 
 ```bash
-git clone <this repo>
+git clone --recurse-submodules https://github.com/marabgol/slurm-cluster-lab.git
 cd docker-scale-out
 git submodule update --init --recursive --depth 1
 make build
