@@ -1,11 +1,11 @@
-# docker-scale-out
+# slurm-cluster-lab
 
-A containerized Slurm cluster for learning and testing, running **Slurm 26.05.3**
-on Docker Compose.
+A containerized multi-node Slurm cluster for learning and testing, running
+**Slurm 26.05.3** on AlmaLinux 9 with cgroup v2, under Docker Compose.
 
-Fork of [SchedMD/training/docker-scale-out](https://gitlab.com/SchedMD/training/docker-scale-out).
-All original work is SchedMD's; changes here are build fixes and small
-configuration defaults.
+Forked from [SchedMD/training/docker-scale-out](https://gitlab.com/SchedMD/training/docker-scale-out).
+The original design is SchedMD's; this fork rebases it on AlmaLinux 9 so it
+runs on cgroup v2 hosts, and carries assorted build fixes.
 
 ---
 
@@ -49,21 +49,28 @@ touching a production cluster.
 - **Docker CE** with the Compose v2 plugin
 - **60 GB disk** minimum (the `scaleout` image alone is ~15 GB)
 - **16 GB RAM** minimum; 32 GB comfortable
-- **cgroup v1** — see below
+- **cgroup v2** — the default on Ubuntu 22.04 and most current distributions,
+  so usually nothing to do
 
-### cgroup v1 is required
+### cgroup v2
 
-The containers run systemd internally, and the AlmaLinux 8 base ships
-systemd 239, which is compiled with `default-hierarchy=legacy`. It cannot
-start under a unified (v2) hierarchy. On a v2 host:
+The containers run systemd internally. The AlmaLinux 9 base ships systemd 252,
+compiled `default-hierarchy=unified`, so it starts cleanly under cgroup v2 and
+Slurm's `CgroupPlugin=autodetect` picks `cgroup/v2` with no config change.
+
+Verify the host:
 
 ```bash
-sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="systemd.unified_cgroup_hierarchy=0 /' /etc/default/grub
-sudo update-grub && sudo reboot
+ls /sys/fs/cgroup/ | head -3      # expect cgroup.controllers
+docker info | grep -i "Cgroup Version"
 ```
 
-Verify after reboot — `ls /sys/fs/cgroup/` should show `blkio`, `cpu`, etc.,
-not `cgroup.controllers`.
+If you previously forced cgroup v1 for an AlmaLinux 8 build, remove the flag:
+
+```bash
+sudo sed -i 's/ systemd.unified_cgroup_hierarchy=0//' /etc/default/grub
+sudo update-grub && sudo reboot
+```
 
 ### Elasticsearch
 
@@ -164,9 +171,9 @@ docker compose exec mgmtnode journalctl -u slurmctld -n 30 --no-pager
 
 ## AlmaLinux 9 and cgroup v2
 
-The `almalinux9` branch rebases the image on AlmaLinux 9. The point is cgroup
-v2: Slurm 26.05 supports it and logs a deprecation warning under v1, but
-AlmaLinux 8 can't get there. Its systemd 239 is compiled
+This fork rebases the image on AlmaLinux 9. The point is cgroup v2: Slurm
+26.05 supports it and logs a deprecation warning under v1, but upstream's
+AlmaLinux 8 base can't get there. Its systemd 239 is compiled
 `default-hierarchy=legacy` and looks for `/sys/fs/cgroup/systemd/`, which
 doesn't exist under a unified hierarchy — the container freezes at PID 1 with
 "Failed to create /init.scope: No such file or directory". AlmaLinux 9 ships
@@ -182,8 +189,8 @@ loaded` instead of the v1 deprecation warning.
 
 ### Host setup
 
-Ubuntu 22.04 defaults to cgroup v2, so this branch needs *no* GRUB flag. If
-you previously added one for the AlmaLinux 8 branch, remove it:
+Ubuntu 22.04 defaults to cgroup v2, so no GRUB flag is needed. If you
+previously added one for an AlmaLinux 8 build, remove it:
 
 ```bash
 sudo sed -i 's/ systemd.unified_cgroup_hierarchy=0//' /etc/default/grub
@@ -191,9 +198,6 @@ sudo update-grub && sudo reboot
 ls /sys/fs/cgroup/ | head -3      # cgroup.controllers = v2
 docker info | grep -i "Cgroup Version"
 ```
-
-Note the two branches can't both run on one host: whichever cgroup mode you
-boot, the other branch's systemd won't start.
 
 ### Build fixes for RHEL 9
 
@@ -227,7 +231,7 @@ error: _parse_next_key: Parsing error at unrecognized key: ConstrainKmemSpace
 fatal: Could not open/read/parse cgroup.conf file /etc/slurm/cgroup.conf
 ```
 
-Both are removed on this branch. `CgroupAutomount` mounted the cgroup
+Both are removed here. `CgroupAutomount` mounted the cgroup
 filesystem if it wasn't already mounted — under v2 systemd always provides the
 single unified mount. `ConstrainKmemSpace` limited kernel memory separately;
 v2 merged kernel and user memory into one `memory.max`.
@@ -253,12 +257,31 @@ atomic termination of a whole cgroup.
 
 ---
 
-## Changes in this fork
+## Changes from upstream
 
-- Pinned base images (`almalinux:8`, `alpine`) so builds don't drift as
-  upstream tags move
-- Mirror redirects for retired upstream git URLs
-- `/sys/fs/cgroup` mounted read-write so systemd can create `/init.scope`
+Upstream builds on AlmaLinux 8, which can't run cgroup v2 — its systemd 239 is
+compiled `default-hierarchy=legacy` and freezes at PID 1 under a unified
+hierarchy. This fork rebases on AlmaLinux 9 (systemd 252) and works on cgroup
+v2 without host GRUB changes.
+
+Getting there needed ten fixes, detailed in
+[AlmaLinux 9 and cgroup v2](#almalinux-9-and-cgroup-v2):
+
+- RHEL 9 package renames — `powertools` → `crb`, `mailx` → `s-nail`, `xmvn` →
+  `maven`, `lua-json` and `python3-virtualenv` dropped
+- `python3.11` symlinks in `/usr/local/bin` — RHEL 9 doesn't register python3
+  with `alternatives`
+- `python3.9` site-packages paths, where upstream assumed 3.6
+- msmtp built with `--disable-nls` to sidestep a gettext version mismatch
+- munge's SysV init script removed — `systemd-sysv-install` isn't present, so
+  `systemctl enable` fails trying to sync it
+- Host `/sys/fs/cgroup` bind mounts removed entirely; Docker's systemd driver
+  already gives each container a private cgroup namespace on v2
+- cgroup v1-only options dropped from `cgroup.conf` (`CgroupAutomount`,
+  `ConstrainKmemSpace`) — these are fatal under v2, not merely deprecated
+
+Other changes carried over from the AlmaLinux 8 work:
+
 - Capped build parallelism (`make -j4`) — unbounded `make -j` across 22 build
   steps exhausts memory on smaller machines
 - Persistent MySQL volume, so the accounting database survives
@@ -269,18 +292,11 @@ atomic termination of a whole cgroup.
   stack — as `sufficient` it can never actually deny a login
 - Grafana dashboard provisioning rewritten to the current schema — the shipped
   version crashes modern Grafana on startup
-- Default Slurm version set to 26.05.3
+- Mirror redirects for retired upstream git URLs
 
 ---
 
 ## Known limitations
-
-**cgroup v2 requires the `almalinux9` branch.** The default branch is built on
-AlmaLinux 8, whose systemd 239 is compiled `default-hierarchy=legacy` and
-freezes at PID 1 under a unified hierarchy — so the host must boot with
-`systemd.unified_cgroup_hierarchy=0`. The `almalinux9` branch moves the base
-image to AlmaLinux 9 (systemd 252, `default-hierarchy=unified`) and works on
-cgroup v2. See [AlmaLinux 9 and cgroup v2](#almalinux-9-and-cgroup-v2).
 
 **arm64 untested** — see [Architecture](#architecture).
 
