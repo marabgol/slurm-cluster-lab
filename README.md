@@ -294,12 +294,3 @@ Other changes carried over from the AlmaLinux 8 work:
   version crashes modern Grafana on startup
 - Mirror redirects for retired upstream git URLs
 
----
-
-## Known limitations
-
-**arm64 untested** — see [Architecture](#architecture).
-
-**Not a production deployment.** Passwords are hardcoded, containers run
-privileged, and the whole cluster shares one host. It's a learning and testing
-environment.
