@@ -81,7 +81,7 @@ runs under qemu emulation.
 git clone --recurse-submodules --shallow-submodules \
   https://github.com/marabgol/slurm-cluster-lab.git
 cd slurm-cluster-lab
-git submodule status | grep -v "^ "      # any output: run git submodule update --init --recursive
+git submodule update --init --recursive --depth 1    # always: fills anything missing
 make
 ```
 
@@ -174,11 +174,14 @@ docker compose logs node01 | tail
 "Too many open files" means the host's inotify limit is too low. See
 [docs/host-setup.md](docs/host-setup.md).
 
-**The build fails on a `COPY src/...` line.** A submodule didn't populate:
+**The build fails on a source directory**, with errors like `does not
+appear to contain CMakeLists.txt`, `configure.ac is required`, or `not found`
+on a `COPY src/...` line. Submodules are missing, typically after a plain
+`git clone`:
 
 ```bash
-git submodule status | grep -v "^ "
-git submodule update --init --recursive
+git submodule status --recursive | grep -v "^ "     # lines starting "-" are missing
+git submodule update --init --recursive --depth 1
 ```
 
 **General health:**

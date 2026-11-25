@@ -71,7 +71,8 @@ df -h /
 ## 2. Run the setup script
 
 ```bash
-git clone https://github.com/marabgol/slurm-cluster-lab.git
+git clone --recurse-submodules --shallow-submodules \
+  https://github.com/marabgol/slurm-cluster-lab.git
 cd slurm-cluster-lab
 ./setup-host.sh --check      # report what's missing, change nothing
 ./setup-host.sh              # install and configure
@@ -161,25 +162,28 @@ pinned commits.
 
 ---
 
-## 3. Clone and build
+## 3. Fetch submodules and build
+
+The build compiles ~28 projects whose sources are git submodules under
+`scaleout/src/`. Always run this before the first build, even if you cloned
+with `--recurse-submodules`:
 
 ```bash
-git clone --recurse-submodules --shallow-submodules \
-  https://github.com/marabgol/slurm-cluster-lab.git
-cd slurm-cluster-lab
-git submodule status | grep -v "^ "      # any output: a submodule didn't populate
+git submodule update --init --recursive --depth 1
+git submodule status --recursive | grep -v "^ "      # expect no output
 make
 ```
 
-If the status check prints anything, a submodule clone failed partway, usually
-a network reset on a large one. Fill it in:
+It does nothing when everything is present, and fills in anything missing:
+from a plain `git clone`, or from a submodule download that failed partway.
+`--depth 1` fetches only the pinned commit of each project, a few hundred
+megabytes instead of several gigabytes of history. If a submodule refuses a
+shallow fetch, rerun the command without `--depth 1`.
 
-```bash
-git submodule update --init --recursive
-```
-
-`--shallow-submodules` fetches only the pinned commits rather than full
-histories, which turns gigabytes of download into a few hundred megabytes.
+Missing submodules don't fail early. An empty source directory copies into
+the image fine, and the build stops later with a confusing error such as
+`CMake Error: The source directory "/usr/local/src/s2n-tls" does not appear
+to contain CMakeLists.txt` or `configure.ac is required`.
 
 ---
 

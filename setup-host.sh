@@ -129,4 +129,6 @@ if [ "$GIT_MIRRORS" = 1 ]; then
 fi
 
 step "Done"
-echo "  Next: git clone --recurse-submodules --shallow-submodules <repo>; cd into it; make"
+echo "  Next, in the repo directory:"
+echo "    git submodule update --init --recursive --depth 1"
+echo "    make"
