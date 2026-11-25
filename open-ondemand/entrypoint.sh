@@ -15,6 +15,7 @@ for i in *; do
 done
 chgrp apache /etc/httpd/.htpasswd
 chmod 0640 /etc/httpd/.htpasswd
+chmod 0400 /etc/shadow
 
 #
 # Use the cluster's shared SSH config and host keys
