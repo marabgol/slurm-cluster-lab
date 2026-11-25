@@ -756,6 +756,7 @@ $LOGGING
 $LOGGING
   kibana:
     image: docker.elastic.co/kibana/kibana-oss:7.10.1
+    platform: linux/amd64
     volumes:
       - /dev/log:/dev/log
     environment:
