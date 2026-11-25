@@ -29,7 +29,7 @@ RUN dnf -y install --allowerasing --exclude google-chrome-* \
 	python3.11 python3.11-pip python3.11-pytest python3.11-requests \
 	bc emacs nano gmp-devel mpfr-devel bison elfutils-debuginfod \
 	>/dev/null
-RUN update-alternatives --set 'java' java-21-openjdk.x86_64 && \
+RUN update-alternatives --set 'java' java-21-openjdk.$(uname -m) && \
         ln -sf /usr/bin/python3.11 /usr/local/bin/python3 && \
 	ln -sf /usr/bin/pip3.11 /usr/local/bin/pip3 && \
 	ln -sf $(which pytest-3.11) /usr/bin/pytest-3 && \
