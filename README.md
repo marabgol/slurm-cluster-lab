@@ -11,107 +11,90 @@ runs on cgroup v2 hosts, and carries assorted build fixes.
 
 ## What you get
 
-A 23-container cluster that behaves like a real Slurm deployment:
+A 26-container cluster that behaves like a real Slurm deployment:
 
 | Component | Containers |
 |-----------|-----------|
 | Controllers | `mgmtnode` (primary), `mgmtnode2` (backup) |
-| Accounting | `slurmdbd` + MySQL |
+| Accounting | `slurmdbd` + MySQL (`db`) |
 | Compute | `node00`–`node09` |
 | Access | `login`, `rest` (slurmrestd), `proxy` (authenticating HTTP proxy) |
-| Extras | Open OnDemand, Grafana, InfluxDB, Elasticsearch, Kibana, Keycloak |
+| Web portal | Open OnDemand, Keycloak |
+| Monitoring | Grafana, InfluxDB, Elasticsearch ×3, Kibana |
+| Reporting | Open XDMoD |
 
 ```
 $ sinfo
 PARTITION AVAIL  TIMELIMIT  NODES  STATE NODELIST
 cloud        up   infinite   1025  idle~ cloud[0000-1024]
 debug*       up   infinite     10   idle node[00-09]
-
-$ sinfo --version
-slurm 26.05.3
 ```
 
 The `cloud` partition demonstrates Slurm's power-saving / cloud-bursting
-feature — 1025 nodes defined but powered down (`idle~`), created on demand.
+feature: 1025 nodes defined but powered down (`idle~`).
 
-Real HA, real munge authentication, real cgroup job containment, a working
-REST API, and a slurmdbd accounting chain. Good for learning Slurm
-administration, testing configurations, or reproducing behaviour before
-touching a production cluster.
+Real HA, real munge authentication, cgroup v2 job containment, a working REST
+API, job profiling to InfluxDB, completion records in Elasticsearch, and an
+accounting chain feeding XDMoD. Good for learning Slurm administration,
+testing configurations, or reproducing behaviour before touching a production
+cluster.
 
 ---
 
 ## Requirements
 
-- Runs on a VM, bare metal, or a cloud instance
-- **Tested on x86_64.** arm64 is probably viable but untested — see
-  [Architecture](#architecture) below
-- **Docker CE** with the Compose v2 plugin
-- **60 GB disk** minimum (the `scaleout` image alone is ~15 GB)
-- **16 GB RAM** minimum; 32 GB comfortable
-- **cgroup v2** — the default on Ubuntu 22.04 and most current distributions,
-  so usually nothing to do
+Runs on **x86_64 and arm64**, including Apple Silicon:
 
-### cgroup v2
+| Tested on | Architecture |
+|-----------|--------------|
+| Ubuntu 22.04, VirtualBox on an Intel iMac | x86_64 |
+| Ubuntu 26.04.1 LTS, Parallels on an Apple M3 | arm64 |
 
-The containers run systemd internally. The AlmaLinux 9 base ships systemd 252,
-compiled `default-hierarchy=unified`, so it starts cleanly under cgroup v2 and
-Slurm's `CgroupPlugin=autodetect` picks `cgroup/v2` with no config change.
+- **8 CPUs, 16 GB RAM** minimum (32 GB comfortable)
+- **100 GB free disk** minimum, 150–200 GB recommended
+- **Docker CE** with Compose v2, cgroup v2, and a few kernel settings
 
-Verify the host:
+The host needs preparing before the first build. **See
+[docs/host-setup.md](docs/host-setup.md)**, or run the script that automates
+it:
 
 ```bash
-ls /sys/fs/cgroup/ | head -3      # expect cgroup.controllers
-docker info | grep -i "Cgroup Version"
+./setup-host.sh --check     # report only
+./setup-host.sh             # install Docker, set sysctls, qemu on arm64
 ```
 
-If you previously forced cgroup v1 for an AlmaLinux 8 build, remove the flag:
+The two settings that most often catch people out:
 
-```bash
-sudo sed -i 's/ systemd.unified_cgroup_hierarchy=0//' /etc/default/grub
-sudo update-grub && sudo reboot
-```
+- **inotify limits.** 16 containers run systemd, and Ubuntu's default of 128
+  inotify instances runs out. Nodes then stay `unk*` or exit with "Too many
+  open files".
+- **`vm.max_map_count=262144`**, or Elasticsearch won't start.
 
-### Elasticsearch
-
-```bash
-sudo sysctl -w vm.max_map_count=262144
-```
-
-### Architecture
-
-Built and tested on x86_64. Every image the core cluster needs is multi-arch
-(`almalinux`, `mysql`, `alpine`, `grafana`, `influxdb`, `elasticsearch`), so an
-arm64 build should be possible — but two optional services have no arm64
-image and would need disabling or substituting:
-
-| Image | arm64 |
-|-------|-------|
-| `docker.elastic.co/kibana/kibana-oss:7.10.1` | no |
-| `treydock/ood:latest` (Open OnDemand) | no |
-
-Untested. Note also that multi-arch base images don't guarantee the ~28
-source-built components compile cleanly on aarch64.
+On arm64 everything runs natively except Kibana, which has no arm64 image and
+runs under qemu emulation.
 
 ---
 
 ## Quick start
 
 ```bash
-git clone --recurse-submodules https://github.com/marabgol/slurm-cluster-lab.git
-cd docker-scale-out
-git submodule update --init --recursive --depth 1
-make build
+git clone --recurse-submodules --shallow-submodules \
+  https://github.com/marabgol/slurm-cluster-lab.git
+cd slurm-cluster-lab
+git submodule status | grep -v "^ "      # any output: run git submodule update --init --recursive
+make
 ```
 
-The first build takes 45–90 minutes. It compiles Slurm, PMIx, Podman, OpenMPI,
-gdb and roughly 25 other components from source.
+`make` builds the images and starts the cluster. The first build compiles
+Slurm, PMIx, OpenMPI, Podman, gdb, valgrind and roughly 20 other components
+from source: about 20 minutes on an Apple M3, 45–90 minutes on an older Intel
+machine.
 
-Then:
+Allow two or three minutes after startup, then:
 
 ```bash
-sinfo                                    # via: docker compose exec login bash
 docker compose exec login bash
+sinfo
 su - fred
 sbatch -N2 --wrap="hostname; sleep 30"
 squeue
@@ -123,13 +106,26 @@ pebbles wilma`, all under the `bedrock` account.
 
 ### Web interfaces
 
-| Service | Port |
-|---------|------|
-| Open OnDemand | 8081 |
-| Grafana | 3000 |
-| Slurm REST (via proxy) | 8080 |
-| Kibana | 5601 |
-| Keycloak | 8083 |
+| Service | URL | Login |
+|---------|-----|-------|
+| Open OnDemand | `http://<host>:8081` | any cluster user / `password` |
+| Open XDMoD | `https://<host>:8082` | `admin` / `admin` |
+| Grafana | `http://<host>:3000` | `admin` / `admin` |
+| Kibana | `http://<host>:5601` | none |
+| Keycloak | `http://<host>:8083` | service account, see `keycloak/startup.sh` |
+| Slurm REST (via proxy) | `http://<host>:8080` | |
+
+XDMoD uses a self-signed certificate, so expect a browser warning.
+
+**XDMoD** shows nothing until jobs have finished and been ingested. An hourly
+cron job on `mgmtnode` exports finished jobs, and the xdmod container ingests
+them. To populate it straight away:
+
+```bash
+docker compose exec mgmtnode /etc/cron.hourly/dump_xdmod.sh 2026-01-01
+docker compose exec xdmod /usr/local/sbin/xdmod-ingest.sh
+docker compose exec xdmod runuser -u xdmod -- acl-config
+```
 
 ---
 
@@ -152,20 +148,49 @@ rebuilds only the Slurm layers, not the whole image.
 
 ```bash
 docker compose stop / start      # pause and resume, fastest
-docker compose down / up -d      # recreate containers
-make clean && make               # full reset: wipes volumes and accounting DB
+docker compose down / up -d      # recreate containers, keep volumes
+make clean && make               # full reset: wipes volumes, images and accounting DB
 ```
 
-Allow 1–2 minutes after startup before `sinfo` responds. The node config is
-generated at runtime by a script that waits for slurmdbd.
+Use `timeout 15 sinfo` while testing. A hang means slurmctld isn't answering.
 
-Use `timeout 15 sinfo` while testing — a hang means slurmctld isn't answering,
-and the timeout saves a stuck terminal. When something looks wrong:
+### Troubleshooting
+
+**`sinfo` hangs after a fresh start.** MySQL was still initialising its empty
+volume when slurmdbd started. Restart in dependency order:
 
 ```bash
-docker compose exec mgmtnode systemctl is-system-running
+docker compose exec slurmdbd systemctl restart slurmdbd
+sleep 10
+docker compose exec mgmtnode systemctl restart slurmctld
+```
+
+**Some nodes stay `unk*`, or a node container has exited.** Check its log:
+
+```bash
+docker compose logs node01 | tail
+```
+
+"Too many open files" means the host's inotify limit is too low. See
+[docs/host-setup.md](docs/host-setup.md).
+
+**The build fails on a `COPY src/...` line.** A submodule didn't populate:
+
+```bash
+git submodule status | grep -v "^ "
+git submodule update --init --recursive
+```
+
+**General health:**
+
+```bash
+docker compose ps -a --format "{{.Name}}\t{{.Status}}" | grep -v "Up "
 docker compose exec mgmtnode journalctl -u slurmctld -n 30 --no-pager
 ```
+
+**`make clean` doesn't remove everything.** It does nothing if
+`docker-compose.yml` is missing, and it can't remove volumes still held by
+containers started outside Compose. Check `docker ps -a` for strays.
 
 ---
 
@@ -189,15 +214,9 @@ loaded` instead of the v1 deprecation warning.
 
 ### Host setup
 
-Ubuntu 22.04 defaults to cgroup v2, so no GRUB flag is needed. If you
-previously added one for an AlmaLinux 8 build, remove it:
-
-```bash
-sudo sed -i 's/ systemd.unified_cgroup_hierarchy=0//' /etc/default/grub
-sudo update-grub && sudo reboot
-ls /sys/fs/cgroup/ | head -3      # cgroup.controllers = v2
-docker info | grep -i "Cgroup Version"
-```
+Ubuntu 22.04 and later default to cgroup v2, so no GRUB flag is needed. See
+[docs/host-setup.md](docs/host-setup.md) if the host was previously forced to
+v1.
 
 ### Build fixes for RHEL 9
 
@@ -280,17 +299,48 @@ Getting there needed ten fixes, detailed in
 - cgroup v1-only options dropped from `cgroup.conf` (`CgroupAutomount`,
   `ConstrainKmemSpace`) — these are fatal under v2, not merely deprecated
 
-Other changes carried over from the AlmaLinux 8 work:
+### arm64 support
 
-- Capped build parallelism (`make -j4`) — unbounded `make -j` across 22 build
-  steps exhausts memory on smaller machines
+The same repo builds on both architectures:
+
+- `java-21-openjdk.$(uname -m)` instead of a hardcoded `x86_64`
+- Kibana pinned to `platform: linux/amd64`, since `kibana-oss:7.10.1` has no
+  arm64 image. Everything else is native.
+
+### Fixes found while reproducing from a clean clone
+
+- **Submodules pinned to tested commits.** Unpinned, each submodule followed
+  its upstream HEAD, and newer libjwt (CMake-only) broke the autotools build.
+- **Open OnDemand dashboard.** `/etc/shadow` is set to `0400` at container
+  start. With RHEL 9's default `000`, the `pam_unix` helper couldn't read
+  account data when Apache ran `sudo nginx_stage`, so every login ended in
+  "PAM account management error".
+- **XDMoD export.** The hourly `dump_xdmod.sh` now sets `PATH`; under cron it
+  couldn't find `sacct` and exported nothing.
+
+### Carried over from the AlmaLinux 8 work
+
+- Capped build parallelism (`make -j4`). Unbounded `make -j` across 22 build
+  steps exhausts memory on smaller machines.
 - Persistent MySQL volume, so the accounting database survives
-  `docker compose down` and the cluster ID stays stable
-- XDMoD disabled by default (its CentOS 7 base image no longer has working
-  package mirrors)
+  `docker compose down` and the cluster ID stays stable.
 - `pam_slurm_adopt` changed from `sufficient` to `required` in the SSH PAM
-  stack — as `sufficient` it can never actually deny a login
-- Grafana dashboard provisioning rewritten to the current schema — the shipped
-  version crashes modern Grafana on startup
-- Mirror redirects for retired upstream git URLs
+  stack. As `sufficient` it can never actually deny a login.
+- Grafana dashboard provisioning rewritten to the current schema. The shipped
+  version crashes modern Grafana on startup.
 
+---
+
+## Known limitations
+
+**Not a production deployment.** Passwords are hardcoded, containers run
+privileged, and the whole cluster shares one host. It's a learning and testing
+environment.
+
+**Kibana is the legacy OSS 7.10 build**, emulated on arm64. Replacing the
+Elastic pair with OpenSearch and OpenSearch Dashboards would make it native
+and maintained.
+
+**Some base images float** (`almalinux:9`, `grafana/grafana:latest`,
+`keycloak:latest`, `mysql:8`). A future upstream release can break the build
+the way `grafana:latest` once broke dashboard provisioning.
