@@ -7,6 +7,7 @@
 #   /etc/cron.hourly/dump_xdmod.sh 2026-01-01
 [ -d /xdmod ] || exit 0
 export TZ=UTC
+export PATH=/usr/local/bin:/usr/local/sbin:$PATH
 START="${1:-now-1hour}"
 
 sacct --allusers --parsable2 --noheader --allocations --duplicates \
